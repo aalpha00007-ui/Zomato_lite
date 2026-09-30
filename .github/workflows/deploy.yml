@@ -68,17 +68,29 @@ jobs:
       - name: Deploy to Vercel
         id: deploy
         run: |
-          npm install -g vercel@latest > /dev/null
-          vercel link --yes --token "$VERCEL_TOKEN"
+          # Run a command; if it fails, show its last lines as a readable error note.
+          step() {
+            local label="$1"; shift
+            if ! "$@" > out.txt 2>&1; then
+              echo "::error title=$label failed::$(tail -n 8 out.txt | sed 's/%/%25/g' | tr '\n' ' ')"
+              cat out.txt; exit 1
+            fi
+            cat out.txt
+          }
+          npm install -g vercel@latest > /dev/null 2>&1
+          step "Vercel login check" vercel whoami --token "$VERCEL_TOKEN"
+          step "Vercel link" vercel link --yes --project zomato-lite --token "$VERCEL_TOKEN"
           vercel env rm DATABASE_URL production --yes --token "$VERCEL_TOKEN" > /dev/null 2>&1 || true
-          printf '%s' "$DATABASE_URL" | vercel env add DATABASE_URL production --token "$VERCEL_TOKEN"
-          vercel deploy --prod --yes --token "$VERCEL_TOKEN" > deploy-url.txt
+          printf '%s' "$DATABASE_URL" > dburl.txt
+          step "Vercel env add" sh -c 'vercel env add DATABASE_URL production --token "$VERCEL_TOKEN" < dburl.txt'
+          rm dburl.txt
+          step "Vercel deploy" vercel deploy --prod --yes --token "$VERCEL_TOKEN"
           PROJECT_ID=$(jq -r .projectId .vercel/project.json)
           ORG_ID=$(jq -r .orgId .vercel/project.json)
           DOMAIN=$(curl -s -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v9/projects/$PROJECT_ID?teamId=$ORG_ID" \
             | jq -r '[.targets.production.alias[]? | select(endswith(".vercel.app"))] | sort_by(length) | .[0] // empty')
-          echo "Production URL: https://$DOMAIN"
+          echo "::notice title=Live URL::https://$DOMAIN"
           echo "url=https://$DOMAIN" >> "$GITHUB_OUTPUT"
 
       - name: Break it on purpose (against the live site)
@@ -91,6 +103,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"restaurantId":1,"rating":500,"comment":"hacked"}')
           cat body.txt; echo "  [HTTP $CODE]"
+          echo "::notice title=Rating 500 on live site::HTTP $CODE $(cat body.txt)"
           test "$CODE" = "400"
           {
             echo "## Live at $URL"
