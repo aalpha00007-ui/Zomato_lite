@@ -28,7 +28,14 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Build
-        run: npm run build
+        run: |
+          if ! npm run build > build.log 2>&1; then
+            grep -E "Type error|Error:|error TS|Failed to compile|Module not found|\.tsx?:[0-9]+" build.log | head -10 | while IFS= read -r line; do
+              echo "::error title=Build failed::$line"
+            done
+            cat build.log; exit 1
+          fi
+          tail -40 build.log
 
       - name: Check secrets are set (never prints their values)
         run: |
@@ -52,6 +59,9 @@ jobs:
           post() { curl -s -w "  [HTTP %{http_code}]" -X POST localhost:3000/api/reviews -H "Content-Type: application/json" -d "$1"; }
 
           show "GET /api/restaurants/1"   "$(curl -s -w '  [HTTP %{http_code}]' localhost:3000/api/restaurants/1)"
+          show "GET /api/restaurants?city=2&q=biryani" "$(curl -s -w '  [HTTP %{http_code}]' 'localhost:3000/api/restaurants?city=2&q=biryani' | head -c 600)"
+          show "POST /api/cart without logging in" "$(curl -s -w '  [HTTP %{http_code}]' -X POST localhost:3000/api/cart -H 'Content-Type: application/json' -d '{"menuItemId":1,"change":1}')"
+          show "POST /api/auth/login with wrong OTP" "$(curl -s -w '  [HTTP %{http_code}]' -X POST localhost:3000/api/auth/login -H 'Content-Type: application/json' -d '{"name":"Test","phone":"9876543210","otp":"0000"}')"
           show "GET /api/restaurants/999" "$(curl -s -w '  [HTTP %{http_code}]' localhost:3000/api/restaurants/999)"
           if [ "${{ steps.db.outputs.seeded }}" = "true" ]; then
             show "POST rating 5, 'Great'" "$(post '{"restaurantId":1,"rating":5,"comment":"Great"}')"
@@ -64,6 +74,8 @@ jobs:
           # Fail the run if the bad requests were not rejected.
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3000/api/reviews -H 'Content-Type: application/json' -d '{"restaurantId":1,"rating":500,"comment":"x"}')" = "400"
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:3000/api/restaurants/999)" = "404"
+          test "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:3000/api/restaurants?city=1')" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3000/api/cart -H 'Content-Type: application/json' -d '{"menuItemId":1,"change":1}')" = "401"
 
       - name: Deploy to Vercel
         id: deploy
