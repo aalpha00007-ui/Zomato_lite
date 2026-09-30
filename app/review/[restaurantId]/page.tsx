@@ -1,34 +1,32 @@
 "use client";
 
-// Screen 1 - write a review.
-// The frontend collects three things, hands them to POST /api/reviews, and steps back.
-// Its checks (submit disabled until ready) are kindness. The backend's checks are security.
-import Link from "next/link";
+// Write a review. The frontend collects three things, hands them to POST /api/reviews, and steps back.
+// Its checks (Submit disabled until ready) are kindness. The backend's checks are security.
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { Empty, FoodTile, RedButton, TopBar } from "@/components/Bits";
+import { StarIcon } from "@/components/Icons";
+import { api } from "@/lib/api";
+import type { Me, RestaurantPage } from "@/lib/types";
 
 const STARS = [1, 2, 3, 4, 5];
+const WORDS = ["", "Horrible", "Bad", "Average", "Good", "Excellent"];
 
 export default function ReviewScreen() {
   const { restaurantId } = useParams<{ restaurantId: string }>();
   const router = useRouter();
 
-  const [name, setName] = useState<string | null>(null);
+  const [restaurant, setRestaurant] = useState<RestaurantPage | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [me, setMe] = useState<Me["user"]>(null);
   const [rating, setRating] = useState<number | null>(null);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the restaurant name so you know what you're reviewing.
   useEffect(() => {
-    fetch(`/api/restaurants/${restaurantId}`, { cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok) return setNotFound(true);
-        const body = await res.json();
-        setName(body.name);
-      })
-      .catch(() => setNotFound(true));
+    api<RestaurantPage>(`/api/restaurants/${restaurantId}`).then((r) => (r.ok ? setRestaurant(r.data) : setNotFound(true)));
+    api<Me>("/api/me").then((r) => r.ok && setMe(r.data.user));
   }, [restaurantId]);
 
   const ready = rating !== null && comment.trim() !== "" && !submitting;
@@ -38,39 +36,36 @@ export default function ReviewScreen() {
     if (!ready) return;
     setSubmitting(true);
     setError(null);
-    try {
-      const res = await fetch("/api/reviews", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restaurantId: Number(restaurantId), rating, comment }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        // Show exactly what the backend said - no invented messages.
-        setError(body.error);
-        setSubmitting(false);
-        return;
-      }
-      router.push(`/restaurant/${restaurantId}`);
-    } catch {
-      setError("Could not reach the server.");
+    const r = await api<{ reviewId: number }>("/api/reviews", {
+      method: "POST",
+      body: { restaurantId: Number(restaurantId), rating, comment },
+    });
+    if (!r.ok) {
+      // Show exactly what the backend said - no invented messages.
+      setError(r.data.error ?? "Something went wrong.");
       setSubmitting(false);
+      return;
     }
+    router.push(`/restaurant/${restaurantId}#reviews`);
   }
 
-  if (notFound) return <p className="text-muted">Restaurant not found.</p>;
+  if (notFound) return <><TopBar title="Write a review" /><Empty emoji="🔎" title="Restaurant not found" body="It may have been removed." /></>;
 
   return (
-    <form onSubmit={submit}>
-      <Link href={`/restaurant/${restaurantId}`} className="text-sm text-muted hover:text-ink">
-        ← Back
-      </Link>
-      <p className="mt-8 text-sm text-muted">Your review of</p>
-      <h1 className="text-3xl font-semibold tracking-tight">{name ?? "..."}</h1>
+    <form onSubmit={submit} className="min-h-screen">
+      <TopBar title="Write a review" back={`/restaurant/${restaurantId}`} />
 
-      <fieldset className="mt-10">
-        <legend className="text-sm font-medium">Rating</legend>
-        <div className="mt-3 flex gap-2">
+      <div className="flex items-center gap-3 px-4 pt-5">
+        {restaurant && <FoodTile emoji={restaurant.emoji} tint={restaurant.tint} className="h-14 w-14 rounded-xl [&>span]:text-3xl" />}
+        <div>
+          <p className="text-lg font-bold leading-tight">{restaurant?.name ?? "..."}</p>
+          <p className="text-sm text-muted">{restaurant ? `${restaurant.area}, ${restaurant.city}` : ""}</p>
+        </div>
+      </div>
+
+      <section className="mt-8 px-4 text-center">
+        <p className="font-semibold">How was the food?</p>
+        <div className="mt-4 flex justify-center gap-2">
           {STARS.map((n) => {
             const on = rating !== null && n <= rating;
             return (
@@ -80,37 +75,37 @@ export default function ReviewScreen() {
                 onClick={() => setRating(n)}
                 aria-label={`${n} star${n > 1 ? "s" : ""}`}
                 aria-pressed={rating === n}
-                className={`h-12 w-12 rounded-md border text-2xl transition-colors ${
-                  on ? "border-accent bg-accent text-paper" : "border-line text-muted hover:border-accent"
+                className={`flex h-12 w-12 items-center justify-center rounded-xl border transition-colors ${
+                  on ? "border-rating bg-rating text-white" : "border-line text-line hover:border-rating"
                 }`}
               >
-                ★
+                <StarIcon className="h-6 w-6" />
               </button>
             );
           })}
         </div>
-      </fieldset>
+        <p className="mt-2 h-5 text-sm font-medium text-rating">{rating ? WORDS[rating] : ""}</p>
+      </section>
 
-      <label className="mt-8 block">
-        <span className="text-sm font-medium">Comment</span>
+      <label className="mt-6 block px-4">
+        <span className="text-sm font-semibold">Tell others about your experience</span>
         <textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          rows={4}
-          placeholder="How was it?"
-          className="mt-3 block w-full rounded-md border border-line bg-white px-4 py-3 outline-none focus:border-accent"
+          rows={5}
+          placeholder="What did you order? How was the taste, portion and packaging?"
+          className="mt-2 block w-full rounded-xl border border-line px-4 py-3 text-sm outline-none focus:border-brand"
         />
       </label>
 
-      {error && <p className="mt-4 text-sm text-accent">{error}</p>}
+      <p className="mt-2 px-4 text-xs text-muted">{me ? `Posting as ${me.name}` : "Posting as Guest - log in to use your name."}</p>
+      {error && <p className="mt-4 px-4 text-sm text-brand">{error}</p>}
 
-      <button
-        type="submit"
-        disabled={!ready}
-        className="mt-8 w-full rounded-md bg-ink px-5 py-3 font-medium text-paper hover:bg-accent disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
-      >
-        {submitting ? "Sending..." : "Submit"}
-      </button>
+      <div className="px-4 pb-10 pt-6">
+        <RedButton type="submit" disabled={!ready} className="w-full">
+          {submitting ? "Posting..." : "Submit review"}
+        </RedButton>
+      </div>
     </form>
   );
 }

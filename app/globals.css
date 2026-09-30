@@ -1,17 +1,31 @@
 @import "tailwindcss";
 
-/* One quiet palette: off-white paper, near-black ink, one warm accent. */
+/* Food-app palette: white surfaces, a bold red brand colour, green rating badges. */
 @theme {
-  --color-paper: #faf8f4;
-  --color-ink: #1c1a17;
-  --color-muted: #77706a;
-  --color-line: #e7e2da;
-  --color-soft: #f3efe8;
-  --color-accent: #b4532a;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-brand: #e23744;
+  --color-brand-dark: #cb202d;
+  --color-brand-soft: #fdecee;
+  --color-ink: #1c1c1c;
+  --color-muted: #696969;
+  --color-faint: #9c9c9c;
+  --color-line: #e8e8e8;
+  --color-soft: #f4f4f6;
+  --color-rating: #267e3e;
+  --color-veg: #0f8a65;
+  --color-nonveg: #b8472d;
+  --color-offer: #256fef;
+  --color-gold: #d97706;
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
 }
 
 body {
-  background: var(--color-paper);
+  background: #ececef;
   color: var(--color-ink);
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+.tile {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.06);
 }
