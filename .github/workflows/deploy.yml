@@ -1,0 +1,90 @@
+# What happens on every push to main:
+#   1. Build the app (catches code errors before anything goes live)
+#   2. Set up the Neon database (only creates tables the first time - never wipes data)
+#   3. Test the two APIs on a local copy, with no screens at all
+#   4. Deploy to Vercel and give the live site its DATABASE_URL
+#   5. Try to break the live site with a rating of 500 - it must be rejected
+name: Build, test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Set up database
+        id: db
+        run: npm run db:setup
+
+      - name: Test the APIs locally (no UI)
+        run: |
+          npm start -- -p 3000 > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -s localhost:3000 > /dev/null && break; sleep 1; done
+          show() { echo; echo "\$ $1"; echo "$2"; }
+          post() { curl -s -w "  [HTTP %{http_code}]" -X POST localhost:3000/api/reviews -H "Content-Type: application/json" -d "$1"; }
+
+          show "GET /api/restaurants/1"   "$(curl -s -w '  [HTTP %{http_code}]' localhost:3000/api/restaurants/1)"
+          show "GET /api/restaurants/999" "$(curl -s -w '  [HTTP %{http_code}]' localhost:3000/api/restaurants/999)"
+          if [ "${{ steps.db.outputs.seeded }}" = "true" ]; then
+            show "POST rating 5, 'Great'" "$(post '{"restaurantId":1,"rating":5,"comment":"Great"}')"
+          fi
+          show "POST rating 500"        "$(post '{"restaurantId":1,"rating":500,"comment":"Great"}')"
+          show "POST empty comment"     "$(post '{"restaurantId":1,"rating":4,"comment":"   "}')"
+          show "POST restaurant 999"    "$(post '{"restaurantId":999,"rating":4,"comment":"Great"}')"
+          show "GET /api/restaurants/1 (again - average recomputed, nobody updated it)" "$(curl -s localhost:3000/api/restaurants/1)"
+
+          # Fail the run if the bad requests were not rejected.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3000/api/reviews -H 'Content-Type: application/json' -d '{"restaurantId":1,"rating":500,"comment":"x"}')" = "400"
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:3000/api/restaurants/999)" = "404"
+
+      - name: Deploy to Vercel
+        id: deploy
+        run: |
+          npm install -g vercel@latest > /dev/null
+          vercel link --yes --token "$VERCEL_TOKEN"
+          vercel env rm DATABASE_URL production --yes --token "$VERCEL_TOKEN" > /dev/null 2>&1 || true
+          printf '%s' "$DATABASE_URL" | vercel env add DATABASE_URL production --token "$VERCEL_TOKEN"
+          vercel deploy --prod --yes --token "$VERCEL_TOKEN" > deploy-url.txt
+          PROJECT_ID=$(jq -r .projectId .vercel/project.json)
+          ORG_ID=$(jq -r .orgId .vercel/project.json)
+          DOMAIN=$(curl -s -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$PROJECT_ID?teamId=$ORG_ID" \
+            | jq -r '[.targets.production.alias[]? | select(endswith(".vercel.app"))] | sort_by(length) | .[0] // empty')
+          echo "Production URL: https://$DOMAIN"
+          echo "url=https://$DOMAIN" >> "$GITHUB_OUTPUT"
+
+      - name: Break it on purpose (against the live site)
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          echo "\$ GET $URL/api/restaurants/1"
+          curl -s -w "  [HTTP %{http_code}]\n" "$URL/api/restaurants/1"
+          echo "\$ POST $URL/api/reviews  rating=500 comment=hacked"
+          CODE=$(curl -s -o body.txt -w '%{http_code}' -X POST "$URL/api/reviews" \
+            -H "Content-Type: application/json" \
+            -d '{"restaurantId":1,"rating":500,"comment":"hacked"}')
+          cat body.txt; echo "  [HTTP $CODE]"
+          test "$CODE" = "400"
+          {
+            echo "## Live at $URL"
+            echo "- Restaurant page: $URL/restaurant/1"
+            echo "- Write a review: $URL/review/1"
+            echo "- Rating 500 on production: HTTP $CODE, $(cat body.txt)"
+          } >> "$GITHUB_STEP_SUMMARY"
