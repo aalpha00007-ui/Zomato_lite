@@ -77,6 +77,32 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:3000/api/restaurants?city=1')" = "200"
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:3000/api/cart -H 'Content-Type: application/json' -d '{"menuItemId":1,"change":1}')" = "401"
 
+      - name: Test a full order end to end (test account, local copy)
+        run: |
+          npm start -- -p 3001 > server2.log 2>&1 &
+          for i in $(seq 1 30); do curl -s localhost:3001 > /dev/null && break; sleep 1; done
+          B=localhost:3001; J=cookies.txt
+          req() { curl -s -b $J -c $J -H "Content-Type: application/json" "$@"; }
+          check() { if ! echo "$2" | grep -q "$3"; then echo "::error title=End-to-end: $1::$2"; exit 1; fi; echo "ok  $1"; }
+          check "login"          "$(req -X POST $B/api/auth/login -d '{"name":"CI Test","phone":"9000000000","otp":"1234"}')" '"CI Test"'
+          req -X DELETE $B/api/cart > /dev/null
+          ITEM=$(curl -s $B/api/restaurants/2 | jq '.menu[0].items[0].id')
+          OTHER=$(curl -s $B/api/restaurants/3 | jq '.menu[0].items[0].id')
+          check "add to cart"    "$(req -X POST $B/api/cart -d "{\"menuItemId\":$ITEM,\"change\":1}")" '"itemCount":1'
+          check "add again"      "$(req -X POST $B/api/cart -d "{\"menuItemId\":$ITEM,\"change\":1}")" '"qty":2'
+          check "remove one"     "$(req -X POST $B/api/cart -d "{\"menuItemId\":$ITEM,\"change\":-1}")" '"qty":1'
+          check "other restaurant blocked" "$(req -X POST $B/api/cart -d "{\"menuItemId\":$OTHER,\"change\":1}")" 'DIFFERENT_RESTAURANT'
+          check "bill computed"  "$(req $B/api/cart)" 'toPayLabel'
+          ADDR=$(req -X POST $B/api/addresses -d '{"label":"Work","line":"CI test address, Sector 1"}' | jq '.address.id')
+          ORDER=$(req -X POST $B/api/orders -d "{\"addressId\":$ADDR,\"paymentMethod\":\"cod\"}")
+          check "place order"    "$ORDER" '"orderId"'
+          OID=$(echo "$ORDER" | jq '.orderId')
+          check "cart emptied"   "$(req $B/api/cart)" '"itemCount":0'
+          check "order tracking" "$(req $B/api/orders/$OID)" '"Order placed"'
+          check "order history"  "$(req $B/api/orders)" "\"id\":$OID"
+          req -X DELETE $B/api/addresses/$ADDR > /dev/null
+          echo "::notice title=End-to-end order test::login, cart, address, order and tracking all passed (order #$OID)"
+
       - name: Deploy to Vercel
         id: deploy
         run: |
