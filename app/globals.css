@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+/* One quiet palette: off-white paper, near-black ink, one warm accent. */
+@theme {
+  --color-paper: #faf8f4;
+  --color-ink: #1c1a17;
+  --color-muted: #77706a;
+  --color-line: #e7e2da;
+  --color-soft: #f3efe8;
+  --color-accent: #b4532a;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
