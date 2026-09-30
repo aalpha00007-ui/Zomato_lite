@@ -11,7 +11,15 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-const sql = neon(process.env.DATABASE_URL);
+const sql = neon(process.env.DATABASE_URL.trim());
+
+// In GitHub Actions, surface any failure as a readable error note.
+process.on("unhandledRejection", (err) => {
+  const msg = String(err?.message ?? err).replace(/postgres(ql)?:\/\/\S+/g, "postgresql://***");
+  if (process.env.GITHUB_ACTIONS) console.log(`::error::Database setup failed: ${msg}`);
+  console.error(err);
+  process.exit(1);
+});
 const reset = process.argv.includes("--reset");
 
 // Split a .sql file into single statements (Neon's HTTP driver runs one at a time).

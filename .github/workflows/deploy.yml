@@ -30,6 +30,16 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check secrets are set (never prints their values)
+        run: |
+          ok=true
+          if [ -z "$DATABASE_URL" ]; then echo "::error::DATABASE_URL secret is missing or empty"; ok=false
+          elif [[ "$DATABASE_URL" == DATABASE_URL=* ]]; then echo "::error::DATABASE_URL secret starts with 'DATABASE_URL=' - paste only the part starting postgresql://"; ok=false
+          elif [[ "$DATABASE_URL" != postgres* ]]; then echo "::error::DATABASE_URL secret does not start with postgresql:// (starts with '${DATABASE_URL:0:6}...')"; ok=false
+          fi
+          if [ -z "$VERCEL_TOKEN" ]; then echo "::error::VERCEL_TOKEN secret is missing or empty"; ok=false; fi
+          $ok
+
       - name: Set up database
         id: db
         run: npm run db:setup
